@@ -87,10 +87,10 @@ def monitor_link(s1, s2):
             '.ifoutoctets/json'
         r = get(url)
         response = r.json()
-        print response
+        # print response
         # Bps to Kbps
         traffic[s1][s2] = response[0]['metricValue'] * 8 / 1000
-        print traffic[s1][s2]
+        # print traffic[s1][s2]
 
         hub.sleep(0.3)  
 
