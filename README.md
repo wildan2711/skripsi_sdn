@@ -8,5 +8,6 @@
 5. `docker start b7180c1ee30eb81fd2902a4877bb6c11aeebe8961f12201c0fcb84723e21cf26`
 6. `docker exec -it b7180c1ee30eb81fd2902a4877bb6c11aeebe8961f12201c0fcb84723e21cf26 bash`
 7. Buka cmd atau terminal baru, jalankan no 6. lagi
+8. Pada masing-masing terminal, pindah ke folder `/data` : `cd /data`
 8. Pada terminal 1, jalankan controller, contoh: `ryu-manager --observe-links dijkstra_delay.py`
 9. Pada terminal 2, jalankan topology: `python topo2.py`
