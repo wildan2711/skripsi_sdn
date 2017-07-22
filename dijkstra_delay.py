@@ -80,7 +80,8 @@ def dijkstra(graph, node_start, node_end=None):
   
         for p in switches:
             if graph[u][p]!=None:
-                w = delay[u][p]
+                w = delay[u][p] - delay[u][0] / 2 - delay[p][0] / 2
+                print delay[u][p], delay[u][0] / 2, delay[p][0] / 2
                 if distances[u] + w < distances[p]:
                     distances[p] = distances[u] + w
                     previous[p] = u
@@ -201,6 +202,53 @@ class ProjectController(app_manager.RyuApp):
             hub.sleep(0.5)
 
         self.logger.info('Stop monitoring link %s %s' % (s1.dpid, s2.dpid))
+
+    def monitor_link_controller(self, s1):
+        '''
+            Monitors link latency between two switches.
+            Sends ping packet every 0.5 second.
+        '''
+        while True:
+            self.send_ping_packet_controller(s1)
+
+            hub.sleep(0.5)
+
+        self.logger.info('Stop monitoring link %s %s' % (s1.dpid, s2.dpid))
+
+
+    def send_ping_packet_controller(self, s1):
+        '''
+            Send a ping/ICMP packet between two switches.
+            Uses ryu's packet library.
+            Uses a fake MAC and IP address only known to controller.
+        '''
+        datapath = s1
+        dst_mac = self.ping_mac
+        dst_ip = self.ping_ip
+        out_port = datapath.ofproto.OFPP_CONTROLLER
+        actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
+
+        pkt = packet.Packet()
+        pkt.add_protocol(ethernet.ethernet(ethertype=ether_types.ETH_TYPE_IP,
+                                           src=self.controller_mac,
+                                           dst=dst_mac))
+        pkt.add_protocol(ipv4.ipv4(proto=in_proto.IPPROTO_ICMP,
+                                   src=self.controller_ip,
+                                   dst=dst_ip))
+        echo_payload = '%s;%s;%f' % (s1.id, 0, time.time())
+        payload = icmp.echo(data=echo_payload)
+        pkt.add_protocol(icmp.icmp(data=payload))
+        pkt.serialize()
+
+        out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=datapath.ofproto.OFP_NO_BUFFER,
+            data=pkt.data,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions
+        )
+
+        datapath.send_msg(out)
 
     def send_ping_packet(self, s1, s2):
         '''
@@ -376,7 +424,7 @@ class ProjectController(app_manager.RyuApp):
         out_port = ofproto.OFPP_FLOOD
 
         if arp_pkt:
-            print dpid, pkt
+            # print dpid, pkt
             src_ip = arp_pkt.src_ip
             dst_ip = arp_pkt.dst_ip
             if arp_pkt.opcode == arp.ARP_REPLY:
@@ -419,6 +467,7 @@ class ProjectController(app_manager.RyuApp):
         if switch.id not in switches:
             switches.append(switch.id)
             self.datapath_list[switch.id] = switch
+            hub.spawn(self.monitor_link_controller, switch)
 
     @set_ev_cls(event.EventLinkAdd, MAIN_DISPATCHER)
     def _link_add_handler(self, ev):
