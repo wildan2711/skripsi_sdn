@@ -166,59 +166,6 @@ class ProjectController(app_manager.RyuApp):
             self.add_flow(datapath, 1, match_ip, actions)
             self.add_flow(datapath, 1, match_arp, actions)
 
-def get_path(src, dst, first_port, final_port):
-    # Dijkstra's algorithm
-    print "get_path is called, src=%s dst=%s first_port=%s final_port=%s" % (
-        src, dst, first_port, final_port)
-
-    distance = defaultdict(lambda: float('Inf'))
-    previous = defaultdict(lambda: None)
-
-    distance[src] = 0
-    Q = set(switches)
-
-    while len(Q) > 0:
-        u = minimum_distance(distance, Q)
-        Q.remove(u)
-
-        for p in switches:
-            if adjacency[u][p] != None:
-                # print p
-                w = 1
-                if distance[u] + w < distance[p]:
-                    distance[p] = distance[u] + w
-                    previous[p] = u
-
-    total_distance = sum(distance)
-    r = []
-    p = dst
-    r.append(p)
-    q = previous[p]
-    while q is not None:
-        if q == src:
-            r.append(q)
-            break
-        p = q
-        r.append(p)
-        q = previous[p]
-
-    r.reverse()
-    if src == dst:
-        path = [src]
-    else:
-        path = r
-
-    # Now add the ports
-    r = []
-    in_port = first_port
-    for s1, s2 in zip(path[:-1], path[1:]):
-        out_port = adjacency[s1][s2]
-        r.append((s1, in_port, out_port))
-        in_port = adjacency[s2][s1]
-    r.append((dst, in_port, final_port))
-    return r, total_distance
-
-
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
         msg = ev.msg
@@ -246,11 +193,6 @@ def get_path(src, dst, first_port, final_port):
         src = eth.src
         dpid = datapath.id
 
-        if dst == self.ping_mac:
-            # ping packet arrives
-            self.ping_packet_handler(pkt)
-            return
-
         self.mac_to_port.setdefault(dpid, {})
 
         self.mac_to_port[dpid][src] = in_port
@@ -266,9 +208,9 @@ def get_path(src, dst, first_port, final_port):
             dst_ip = arp_pkt.dst_ip
             if arp_pkt.opcode == arp.ARP_REPLY:
                 self.arp_table[src_ip] = src
-                path, d = get_path(mymac[src][0], mymac[dst][
+                path = get_path(mymac[src][0], mymac[dst][
                                 0], mymac[src][1], mymac[dst][1])
-                reverse, d = get_path(mymac[dst][0], mymac[src][
+                reverse = get_path(mymac[dst][0], mymac[src][
                                     0], mymac[dst][1], mymac[src][1])
                 self.install_path(ev, path, src_ip, dst_ip)
                 self.install_path(ev, reverse, dst_ip, src_ip)
@@ -277,9 +219,9 @@ def get_path(src, dst, first_port, final_port):
                 if dst_ip in self.arp_table:
                     dst_mac = self.arp_table[dst_ip]
                         # always try to reply arp requests first
-                    path, d = get_path(mymac[src][0], mymac[dst_mac][
+                    path = get_path(mymac[src][0], mymac[dst_mac][
                                 0], mymac[src][1], mymac[dst_mac][1])
-                    reverse, d = get_path(mymac[dst_mac][0], mymac[src][
+                    reverse = get_path(mymac[dst_mac][0], mymac[src][
                                         0], mymac[dst_mac][1], mymac[src][1])
                     self.install_path(ev, path, src_ip, dst_ip)
                     self.install_path(ev, reverse, dst_ip, src_ip)
