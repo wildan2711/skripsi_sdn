@@ -75,7 +75,7 @@ def init_sflow(ifname, collector, sampling, polling):
             sflow += ' -- set bridge %s sflow=@sflow' % switch
 
     print sflow
-    # os.system(sflow)
+    os.system(sflow)
 
 def monitor_link(s1, s2):
     '''
@@ -85,12 +85,15 @@ def monitor_link(s1, s2):
         url = 'http://' + collector + ':8008/metric/' + \
             collector + '/' + str(switch_info[s1.dpid][int(s1.port_no)]['ifindex']) + \
             '.ifoutoctets/json'
+        # print url
         r = get(url)
         response = r.json()
-        # print response
-        # Bps to Kbps
-        traffic[s1][s2] = response[0]['metricValue'] * 8 / 1000
-        # print traffic[s1][s2]
+        if 'metricValue' in response[0]:
+            # print response[0]['metricValue']
+            link_traffic = response[0]['metricValue']
+            # Bps to Kbps
+            traffic[s1.dpid][s2.dpid] = link_traffic * 8 / 1000
+            # print traffic
 
         hub.sleep(0.3)  
 
