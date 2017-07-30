@@ -122,11 +122,14 @@ class ProjectController(app_manager.RyuApp):
         datapath.send_msg(out)
     
     def failover_handler(self, ev, src_ip, src_mac, in_port):
+        print "setting up failover"        
         msg = ev.msg
         datapath = msg.datapath
         ofp = datapath.ofproto
         ofp_parser = datapath.ofproto_parser
         buckets = []
+
+        print "Failover servers: ", self.server_ips
         for server_ip in self.server_ips:
             server_mac = self.arp_table[server_ip]
             outport = self.mac_to_port[datapath.id][server_mac]
@@ -152,24 +155,24 @@ class ProjectController(app_manager.RyuApp):
         group_action = [ofp_parser.OFPActionGroup(group_id)]
 
         ########### Setup route to server
-        match = ofp_parser.OFPMatch(in_port=in_port, eth_src=src_mac, eth_dst=self.virtual_mac,
+        match = ofp_parser.OFPMatch(in_port=in_port, eth_type=ether_types.ETH_TYPE_IP, 
+                                    eth_src=src_mac, eth_dst=self.virtual_mac,
                                     ipv4_src=src_ip, ipv4_dst=self.virtual_ip)
 
-        self.add_flow(datapath, 1, match, group_action, msg.buffer_id)
+        self.add_flow(datapath, 1, match, group_action)
 
         ########### Setup reverse route from server
         for server_ip in self.server_ips:
-            print "setting up failover"
             server_mac = self.arp_table[server_ip]
             outport = self.mac_to_port[datapath.id][server_mac]
-            print server_mac, outport
-            match = ofp_parser.OFPMatch(in_port=outport, eth_src=server_mac, eth_dst=src_mac,
+            match = ofp_parser.OFPMatch(in_port=outport, eth_type=ether_types.ETH_TYPE_IP, 
+                                        eth_src=server_mac, eth_dst=src_mac,
                                         ipv4_src=server_ip, ipv4_dst=src_ip)
             actions = ([ofp_parser.OFPActionSetField(eth_src=self.virtual_mac),
                        ofp_parser.OFPActionSetField(ipv4_src=self.virtual_ip),
                        ofp_parser.OFPActionOutput(in_port)])
             
-            self.add_flow(datapath, 1, match, actions, msg.buffer_id)
+            self.add_flow(datapath, 1, match, actions)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -208,7 +211,7 @@ class ProjectController(app_manager.RyuApp):
         # packet processing of magic
         # hours of hard work, sweat and tears :')
         if arp_pkt:
-            print dpid, pkt
+            # print dpid, pkt
             src_ip = arp_pkt.src_ip
             dst_ip = arp_pkt.dst_ip
             if arp_pkt.opcode == arp.ARP_REPLY:
@@ -254,7 +257,7 @@ class ProjectController(app_manager.RyuApp):
             src_ip = ipv4_pkt.src
             self.failover_handler(ev, src_ip, src, in_port)
 
-        print pkt
+        # print pkt
 
     @set_ev_cls(event.EventSwitchEnter)
     def switch_enter_handler(self, event):
