@@ -184,7 +184,7 @@ def get_path(src, dst, first_port, final_port):
         for p in switches:
             if adjacency[u][p] != None:
                 # print p
-                w = delay[u][p]
+                w = 1
                 if distance[u] + w < distance[p]:
                     distance[p] = distance[u] + w
                     previous[p] = u
