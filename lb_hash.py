@@ -121,7 +121,7 @@ class ProjectController(app_manager.RyuApp):
             actions=actions, data=arp_packet.data)
         datapath.send_msg(out)
     
-    def failover_handler(self, ev, src_ip, src_mac, in_port):
+    def load_balancing_handler(self, ev, src_ip, src_mac, in_port):
         print "setting up failover"        
         msg = ev.msg
         datapath = msg.datapath
@@ -245,7 +245,7 @@ class ProjectController(app_manager.RyuApp):
                 reply_mac = self.virtual_mac
                 self.send_arp(datapath, src, reply_mac,
                               src_ip, dst_ip, opcode, in_port)
-                self.failover_handler(ev, src_ip, src, in_port)
+                self.load_balancing_handler(ev, src_ip, src, in_port)
             elif src_ip in self.server_ips:
                 # server requests mac of client, send arp reply
                 opcode = arp.ARP_REPLY
@@ -255,7 +255,7 @@ class ProjectController(app_manager.RyuApp):
             return
         elif ipv4_pkt != None:
             src_ip = ipv4_pkt.src
-            self.failover_handler(ev, src_ip, src, in_port)
+            self.load_balancing_handler(ev, src_ip, src, in_port)
 
         # print pkt
 
