@@ -139,7 +139,7 @@ class ProjectController(app_manager.RyuApp):
             datapath=datapath, match=match, cookie=0,
             command=ofproto.OFPFC_ADD, idle_timeout=0, hard_timeout=0,
             priority=0, instructions=inst)
-        datapath.send_msg(mod)
+        datapath.send_msg(mod)w
 
     def install_path(self, ev, p, src_ip, dst_ip):
         '''
@@ -251,3 +251,32 @@ class ProjectController(app_manager.RyuApp):
         s2 = ev.link.dst
         adjacency[s1.dpid][s2.dpid] = s1.port_no
         adjacency[s2.dpid][s1.dpid] = s2.port_no
+        
+    @set_ev_cls(event.EventLinkDelete, MAIN_DISPATCHER)
+    def link_delete_handler(self, event):
+        datapath = event.dp
+        [self.remove_flows(datapath, n) for n in [0, 1]]
+    
+    def remove_flows(self, datapath, table_id):
+        """Removing all flow entries."""
+        parser = datapath.ofproto_parser
+        ofproto = datapath.ofproto
+        empty_match = parser.OFPMatch()
+        instructions = []
+        flow_mod = self.remove_table_flows(datapath, table_id,
+                                        empty_match, instructions)
+        print "deleting all flow entries in table ", table_id
+        datapath.send_msg(flow_mod)
+    
+
+    def remove_table_flows(self, datapath, table_id, match, instructions):
+        """Create OFP flow mod message to remove flows from table."""
+        ofproto = datapath.ofproto
+        flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0, table_id,
+                                                      ofproto.OFPFC_DELETE, 0, 0,
+                                                      1,
+                                                      ofproto.OFPCML_NO_BUFFER,
+                                                      ofproto.OFPP_ANY,
+                                                      OFPG_ANY, 0,
+                                                      match, instructions)
+        return flow_mod
