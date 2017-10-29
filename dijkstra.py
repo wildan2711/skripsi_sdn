@@ -128,6 +128,9 @@ class ProjectController(app_manager.RyuApp):
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
+        self.install_controller(datapath)
+
+    def install_controller(self, datapath):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         match = parser.OFPMatch()
@@ -139,7 +142,7 @@ class ProjectController(app_manager.RyuApp):
             datapath=datapath, match=match, cookie=0,
             command=ofproto.OFPFC_ADD, idle_timeout=0, hard_timeout=0,
             priority=0, instructions=inst)
-        datapath.send_msg(mod)w
+        datapath.send_msg(mod)
 
     def install_path(self, ev, p, src_ip, dst_ip):
         '''
@@ -177,6 +180,7 @@ class ProjectController(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocol(ethernet.ethernet)
         arp_pkt = pkt.get_protocol(arp.arp)
+        ipv4_pkt = pkt.get_protocol(ipv4.ipv4)
         ipv6_pkt = pkt.get_protocol(ipv6.ipv6)
 
         # avoid broadcast from LLDP
@@ -210,6 +214,7 @@ class ProjectController(app_manager.RyuApp):
                 self.arp_table[src_ip] = src
                 path = get_path(mymac[src][0], mymac[dst][
                                 0], mymac[src][1], mymac[dst][1])
+                print path
                 reverse = get_path(mymac[dst][0], mymac[src][
                                     0], mymac[dst][1], mymac[src][1])
                 self.install_path(ev, path, src_ip, dst_ip)
@@ -221,11 +226,26 @@ class ProjectController(app_manager.RyuApp):
                         # always try to reply arp requests first
                     path = get_path(mymac[src][0], mymac[dst_mac][
                                 0], mymac[src][1], mymac[dst_mac][1])
+                    print path
                     reverse = get_path(mymac[dst_mac][0], mymac[src][
                                         0], mymac[dst_mac][1], mymac[src][1])
                     self.install_path(ev, path, src_ip, dst_ip)
                     self.install_path(ev, reverse, dst_ip, src_ip)
                     out_port = path[0][2]
+        elif ipv4_pkt:
+            src_ip = ipv4_pkt.src
+            dst_ip = ipv4_pkt.dst
+            dst_mac = self.arp_table[dst_ip]
+            path = get_path(mymac[src][0], mymac[dst_mac][
+                        0], mymac[src][1], mymac[dst_mac][1])
+            print path
+            reverse = get_path(mymac[dst_mac][0], mymac[src][
+                                0], mymac[dst_mac][1], mymac[src][1])
+            self.install_path(ev, path, src_ip, dst_ip)
+            self.install_path(ev, reverse, dst_ip, src_ip)
+            out_port = path[0][2]
+
+        print pkt
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -253,14 +273,20 @@ class ProjectController(app_manager.RyuApp):
         adjacency[s2.dpid][s1.dpid] = s2.port_no
         
     @set_ev_cls(event.EventLinkDelete, MAIN_DISPATCHER)
-    def link_delete_handler(self, event):
-        datapath = event.dp
-        [self.remove_flows(datapath, n) for n in [0, 1]]
+    def link_delete_handler(self, ev):
+        global adjacency
+        s1 = ev.link.src
+        s2 = ev.link.dst
+        adjacency[s1.dpid][s2.dpid] = None
+        adjacency[s2.dpid][s1.dpid] = None
+        print adjacency
+        for datapath in self.datapath_list.values():
+            [self.remove_flows(datapath, n) for n in [0, 1]]
+            self.install_controller(datapath)
     
     def remove_flows(self, datapath, table_id):
         """Removing all flow entries."""
         parser = datapath.ofproto_parser
-        ofproto = datapath.ofproto
         empty_match = parser.OFPMatch()
         instructions = []
         flow_mod = self.remove_table_flows(datapath, table_id,
@@ -277,6 +303,6 @@ class ProjectController(app_manager.RyuApp):
                                                       1,
                                                       ofproto.OFPCML_NO_BUFFER,
                                                       ofproto.OFPP_ANY,
-                                                      OFPG_ANY, 0,
+                                                      ofproto.OFPP_ANY, 0,
                                                       match, instructions)
         return flow_mod
