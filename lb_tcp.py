@@ -565,10 +565,11 @@ class ProjectController(app_manager.RyuApp):
                 self.add_flow(datapath, 2, match_controller, [])
                 return
             elif dst_ip == self.virtual_ip:
+
                 # client to server
                 opcode = arp.ARP_REPLY
                 out_port = self.send_arp(datapath, src, self.virtual_mac,
-                                         src_ip, self.virtual_ip, opcode, opcode)
+                                         src_ip, self.virtual_ip, opcode,in_port)
                 self.arp_table[src_ip] = src
                 return
             elif src_ip in self.servers:
