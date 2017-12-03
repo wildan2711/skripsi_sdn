@@ -34,6 +34,7 @@ mymac = {}
 
 # adjacency map [sw1][sw2]->port from sw1 to sw2
 adjacency = defaultdict(lambda: defaultdict(lambda: None))
+delay = defaultdict(lambda: defaultdict(lambda: 0))
 
 def minimum_distance(distance, Q):
     min = float('Inf')
@@ -62,7 +63,7 @@ def get_path(src, dst, first_port, final_port):
         for p in switches:
             if adjacency[u][p] != None:
                 # print p
-                w = 1
+                w = delay[u][p]
                 if distance[u] + w < distance[p]:
                     distance[p] = distance[u] + w
                     previous[p] = u
@@ -110,6 +111,75 @@ class ProjectController(app_manager.RyuApp):
         # Maps an IP address to the corresponding MAC address
         self.arp_table = {}
 
+        # Fake addresses only known to the controller
+        self.controller_ip = "10.0.0.100"
+        self.controller_mac = "dd:dd:dd:dd:dd:df"
+        self.ping_mac = "de:dd:dd:dd:de:dd"
+        self.ping_ip = "10.0.0.99"
+
+        self.replied = []
+
+    def monitor_link(self, s1, s2):
+        '''
+            Monitors link latency between two switches.
+            Sends ping packet every 0.5 second.
+        '''
+        while True:
+            self.send_ping_packet(s1, s2)
+
+            hub.sleep(0.5)
+
+        self.logger.info('Stop monitoring link %s %s' % (s1.dpid, s2.dpid))
+
+    def send_ping_packet(self, s1, s2):
+        '''
+            Send a ping/ICMP packet between two switches.
+            Uses ryu's packet library.
+            Uses a fake MAC and IP address only known to controller.
+        '''
+        datapath = self.datapath_list[int(s1.dpid)]
+        dst_mac = self.ping_mac
+        dst_ip = self.ping_ip
+        out_port = s1.port_no
+        actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
+
+        pkt = packet.Packet()
+        pkt.add_protocol(ethernet.ethernet(ethertype=ether_types.ETH_TYPE_IP,
+                                           src=self.controller_mac,
+                                           dst=dst_mac))
+        pkt.add_protocol(ipv4.ipv4(proto=in_proto.IPPROTO_ICMP,
+                                   src=self.controller_ip,
+                                   dst=dst_ip))
+        echo_payload = '%s;%s;%f' % (s1.dpid, s2.dpid, time.time())
+        payload = icmp.echo(data=echo_payload)
+        pkt.add_protocol(icmp.icmp(data=payload))
+        pkt.serialize()
+
+        out = datapath.ofproto_parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=datapath.ofproto.OFP_NO_BUFFER,
+            data=pkt.data,
+            in_port=datapath.ofproto.OFPP_CONTROLLER,
+            actions=actions
+        )
+
+        datapath.send_msg(out)
+
+    def ping_packet_handler(self, pkt):
+        '''
+            Handler function when ping packet arrives.
+            Extracts the data from the packet and calculates the latency.
+        '''
+        icmp_packet = pkt.get_protocol(icmp.icmp)
+        echo_payload = icmp_packet.data
+        payload = echo_payload.data
+        info = payload.split(';')
+        s1 = info[0]
+        s2 = info[1]
+        latency = (time.time() - float(info[2])) * 1000  # in ms
+        # print "s%s to s%s latency = %f ms" % (s1, s2, latency)
+        delay[int(s1)][int(s2)] = latency
+
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
@@ -128,9 +198,6 @@ class ProjectController(app_manager.RyuApp):
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
-        self.install_controller(datapath)
-
-    def install_controller(self, datapath):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         match = parser.OFPMatch()
@@ -180,7 +247,6 @@ class ProjectController(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocol(ethernet.ethernet)
         arp_pkt = pkt.get_protocol(arp.arp)
-        ipv4_pkt = pkt.get_protocol(ipv4.ipv4)
         ipv6_pkt = pkt.get_protocol(ipv6.ipv6)
 
         # avoid broadcast from LLDP
@@ -196,6 +262,11 @@ class ProjectController(app_manager.RyuApp):
         dst = eth.dst
         src = eth.src
         dpid = datapath.id
+
+        if dst == self.ping_mac:
+            # ping packet arrives
+            self.ping_packet_handler(pkt)
+            return
 
         self.mac_to_port.setdefault(dpid, {})
 
@@ -214,9 +285,9 @@ class ProjectController(app_manager.RyuApp):
                 self.arp_table[src_ip] = src
                 path = get_path(mymac[src][0], mymac[dst][
                                 0], mymac[src][1], mymac[dst][1])
-                print path
                 reverse = get_path(mymac[dst][0], mymac[src][
                                     0], mymac[dst][1], mymac[src][1])
+                print path
                 self.install_path(ev, path, src_ip, dst_ip)
                 self.install_path(ev, reverse, dst_ip, src_ip)
                 out_port = path[0][2]
@@ -226,26 +297,12 @@ class ProjectController(app_manager.RyuApp):
                         # always try to reply arp requests first
                     path = get_path(mymac[src][0], mymac[dst_mac][
                                 0], mymac[src][1], mymac[dst_mac][1])
-                    print path
                     reverse = get_path(mymac[dst_mac][0], mymac[src][
                                         0], mymac[dst_mac][1], mymac[src][1])
+                    print path
                     self.install_path(ev, path, src_ip, dst_ip)
                     self.install_path(ev, reverse, dst_ip, src_ip)
                     out_port = path[0][2]
-        elif ipv4_pkt:
-            src_ip = ipv4_pkt.src
-            dst_ip = ipv4_pkt.dst
-            dst_mac = self.arp_table[dst_ip]
-            path = get_path(mymac[src][0], mymac[dst_mac][
-                        0], mymac[src][1], mymac[dst_mac][1])
-            print path
-            reverse = get_path(mymac[dst_mac][0], mymac[src][
-                                0], mymac[dst_mac][1], mymac[src][1])
-            self.install_path(ev, path, src_ip, dst_ip)
-            self.install_path(ev, reverse, dst_ip, src_ip)
-            out_port = path[0][2]
-
-        print pkt
 
         actions = [parser.OFPActionOutput(out_port)]
 
@@ -271,38 +328,4 @@ class ProjectController(app_manager.RyuApp):
         s2 = ev.link.dst
         adjacency[s1.dpid][s2.dpid] = s1.port_no
         adjacency[s2.dpid][s1.dpid] = s2.port_no
-        
-    @set_ev_cls(event.EventLinkDelete, MAIN_DISPATCHER)
-    def link_delete_handler(self, ev):
-        global adjacency
-        s1 = ev.link.src
-        s2 = ev.link.dst
-        adjacency[s1.dpid][s2.dpid] = None
-        adjacency[s2.dpid][s1.dpid] = None
-        print adjacency
-        for datapath in self.datapath_list.values():
-            [self.remove_flows(datapath, n) for n in [0, 1]]
-            self.install_controller(datapath)
-    
-    def remove_flows(self, datapath, table_id):
-        """Removing all flow entries."""
-        parser = datapath.ofproto_parser
-        empty_match = parser.OFPMatch()
-        instructions = []
-        flow_mod = self.remove_table_flows(datapath, table_id,
-                                        empty_match, instructions)
-        print "deleting all flow entries in table ", table_id
-        datapath.send_msg(flow_mod)
-    
-
-    def remove_table_flows(self, datapath, table_id, match, instructions):
-        """Create OFP flow mod message to remove flows from table."""
-        ofproto = datapath.ofproto
-        flow_mod = datapath.ofproto_parser.OFPFlowMod(datapath, 0, 0, table_id,
-                                                      ofproto.OFPFC_DELETE, 0, 0,
-                                                      1,
-                                                      ofproto.OFPCML_NO_BUFFER,
-                                                      ofproto.OFPP_ANY,
-                                                      ofproto.OFPP_ANY, 0,
-                                                      match, instructions)
-        return flow_mod
+        hub.spawn(self.monitor_link, s1, s2)
