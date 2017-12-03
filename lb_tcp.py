@@ -112,7 +112,9 @@ class ProjectController(app_manager.RyuApp):
         self.datapath_list = {}
 
         # Maps an IP address to the corresponding MAC address
-        self.arp_table = {}
+        self.arp_table = {
+            "10.0.0.100": "de:dd:dd:dd:de:dd"
+        }
 
         # Servers to load-balance
         self.servers = [
@@ -140,7 +142,7 @@ class ProjectController(app_manager.RyuApp):
         while True:
             self.send_ping_packet(s1, s2)
 
-            hub.sleep(0.5)
+            hub.sleep(2)
 
         self.logger.info('Stop monitoring link %s %s' % (s1.dpid, s2.dpid))
 
